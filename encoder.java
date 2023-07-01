@@ -1,6 +1,6 @@
 import java.io.*;
 import java.util.Arrays;
-public class nearestDecode
+public class encoder
 {
 	//this method gives the config for a fixed set of values,
     //since this is the best LUT so far.

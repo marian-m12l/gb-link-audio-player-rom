@@ -28,7 +28,7 @@ INCLUDE "ibmpc1.inc"			; nice ascii tileset from devrs.com
 
 SECTION "Timer interrupt", ROM0[$50]
 TimerInterrupt:
-    call PlaySample
+    call playSample
 	nop
 	nop
 	nop
@@ -48,7 +48,6 @@ EntryPoint:
 	jp Start
 
 REPT $150 - $104
-	; FIXME Header data?
 	db 0
 ENDR
 
@@ -83,8 +82,8 @@ Start:
 	ldh [$F8], a	; Reset variable (in High RAM) used in PCM player ???
 	ldh [$F7], a	; Reset variable (in High RAM) used in PCM player ???
 	ld sp, $FFFF	; Set stack pointer
-	;ld hl, BANK1_START	; TODO Play from WRAM buffer instead ($D000 ???)
-	;ld bc, $0100	; TODO Value for bank register??? (MBC1) --> starts with bank 1 (b=$01) ==> SHOULD NOT BE OVERWRITTEN BY COPY LOOPS !!! (OR SAVED TO WRAM BEFOREHAND !!!) 
+	ld hl, $4000	; TODO Play from WRAM buffer instead ($D000 ???)
+	ld bc, $0100
 	xor a
 	ldh [rNR10], a	; Reset(?) channel 1 (Square)
 	ld a, $11
@@ -102,8 +101,6 @@ Start:
 	;ld a, $F9		;Modify this value to change the playback rate!
 	;ld a, $F8		;Modify this value to change the playback rate!
 	ld a, $FC		;Modify this value to change the playback rate!
-	; FIXME is the CGB in single speed fast enough to handle 16KHz playrate AND serial input?
-	ld a, $F8		; TODO Try 8HKz playback !!!
 	ldh [rTMA], a	; Timer modulo --> When TIMA overflows, it is reset to the value in this register and an interrupt is requested. Example of use: if TMA is set to $FF, an interrupt is requested at the clock frequency selected in TAC (because every increment is an overflow). However, if TMA is set to $FE, an interrupt is only requested every two increments, which effectively divides the selected clock by two. Setting TMA to $FD would divide the clock by three, and so on.
 					; $F9 --> freq / 7 ???
 					; $F8 --> freq / 8 == 16384Hz ?
@@ -116,23 +113,19 @@ Start:
 	ld a, $80
 	ldh [rSC], a
 	; TODO Init audio buffers
-	ld de, wPosActiveBuffer		; de holds destination address
-	ld a, LOW(wBuffer0)
-	ld [de], a
-	inc de
-	ld a, HIGH(wBuffer0)
-	ld [de], a
-	ld de, wPosInactiveBuffer		; de holds destination address
-	ld a, LOW(wBuffer1)
-	ld [de], a
-	inc de
-	ld a, HIGH(wBuffer1)
-	ld [de], a
+	ld a, $00
+	ld [$d000], a
+	ld a, $d1
+	ld [$d001], a
+	ld a, $00
+	ld [$d002], a
+	ld a, $d5 		;FIXME $d2
+	ld [$d003], a
 	; TODO Copy ROM audio to RAM?
-	ld bc, wBuffersEnd-wBuffer0		; Buffers can hold 1024 bytes each
-	ld de, BANK1_START	; Audio data in ROM --> load from a given offset?
-	ld hl, wBuffer0 	; Audio buffers in RAM
-.ldAudio:
+	ld bc, 2048		; Buffers can hold 1024 bytes each
+	ld de, $4000	; Audio data in ROM
+	ld hl, $d100 	; Audio buffers in RAM
+ldaudio:
 	ld a, [de]
 	ldi [hl], a
 	inc de
@@ -140,48 +133,34 @@ Start:
 	; TODO check if bc is 0
 	ld a, c
 	or b 	; A=(C OR B)
-	jr nz, .ldAudio
+	jr nz, ldaudio
 	; TODO Init and enable LCD display
 
-	; TODO Initialize buffer pointers
-	ld de, wPosActiveBuffer		; de holds destination address
-	ld a, LOW(wBuffer0)
-	ld [de], a
-	inc de
-	ld a, HIGH(wBuffer0)
-	ld [de], a
-	ld de, wPosInactiveBuffer		; de holds destination address
-	ld a, LOW(wBuffer1)
-	ld [de], a
-	inc de
-	ld a, HIGH(wBuffer1)
-	ld [de], a
 
-
-.waitvbl:
+waitvbl:
 	ldh a, [rLY]	; Read current line
 	cp 144
-	jr c, .waitvbl	; Loop if line 144 not reached
+	jr c, waitvbl	; Loop if line 144 not reached
 
 	xor a	;A=0
 	ldh [rLCDC], a 		; Disable display
 	; TODO Copy tiles data to VRAM
 	;ld b, 8*2		; B = 16 bytes to copy (1 8x8 tile @ 2bpp)
-	ld de, TilesData 	; DE = Tiles address in ROM
-	ld hl, vTile1 	; HL=$8010, VRAM destination (Tile 1)
-.ldTile:
+	ld de, tiles_data 	; DE = Tiles address in ROM
+	ld hl, $8010 	; HL=$8010, VRAM destination (Tile 1)
+ldt:
 	ld a, [de]
 	ldi [hl], a
 	inc de
 	dec b
-	jr nz, .ldTile		; Jump to the next byte
+	jr nz, ldt		; Jump to the next byte
 
 
 	; TODO Copy font tiles to VRAM
-	ld bc, TilesFontDataEnd-TilesFontData
-	ld de, TilesFontData
-	ld hl, vFontTiles	; Copy to tiles 0x20-0x3f
-.ldtFont:
+	ld bc, tiles_font_data_end-tiles_font_data
+	ld de, tiles_font_data
+	ld hl, $8200	; Copy to tiles 0x20-0x3f
+ldt_font:
 	ld a, [de]
 	ldi [hl], a
 	ldi [hl], a		; Font tiles are 1bpp --> copy each byte twice to convert to 2bpp
@@ -190,7 +169,7 @@ Start:
 	; TODO check if bc is 0
 	ld a, c
 	or b 	; A=(C OR B)
-	jr nz, .ldtFont		; Jump to the next byte
+	jr nz, ldt_font		; Jump to the next byte
 
 	; TODO Copy tilemaps to VRAM
 	; TODO Configure Sprite in OAM
@@ -228,17 +207,17 @@ Start:
 	inc l
 
 	; TODO Sprites 3-7: Text made of digits
-	ld b, TextDataEnd-TextData
+	ld b, text_data_end-text_data
 	ld a, 50
-	ld [wTextPosX], a	; X position
-	ld de, TextData
-.textLoop:
+	ld [text_pos_x], a	; X position
+	ld de, text_data
+text_loop:
 	ld [hl], 40 	; OAM sprite Y = 40
 	inc l
-	ld a, [wTextPosX]
+	ld a, [text_pos_x]
 	ld [hl], a		; OAM sprite X = 50 and onward
 	add a, 10
-	ld [wTextPosX], a
+	ld [text_pos_x], a
 	inc l
 	ld a, [de]
 	ld [hl], a 		; OAM sprite tile = digit character
@@ -247,7 +226,7 @@ Start:
 	ld [hl], $00 	; OAM sprite attributes = 0
 	inc l
 	dec b
-	jr nz, .textLoop
+	jr nz, text_loop
 
 	; Scroll and palettes
 	xor a	;A=0
@@ -291,47 +270,41 @@ Start:
 	ld a, %10010011 ; Screen on, Background on, tiles at $8000
 	ldh [rLCDC], a
 
-	; Set audio source
-	;ld hl, BANK1_START	; Play from ROM data
-	;ld hl, wBuffer0	; TODO Play from WRAM buffer
-	;ld bc, $0100	; bank
+	; DEBUG
+	ld hl, $4000	; TODO Play from WRAM buffer instead ($D000 ???)
 	ei
 
-.waitforInt:
+waitforInt:
 	nop
 	nop
-	jr .waitforInt
+	jr waitforInt
 
-PlaySample:
+playSample:
 	; TODO Get read position from WRAM
-	; FIXME Uncomment to read from WRAM
-	ld de, wPosActiveBuffer
-	; de contains wPosActiveBuffer address
-	ld a, [de]
-	ld l, a		; load low byte of wPosActiveBuffer value into l
-	inc de
-	ld a, [de]
-	ld h, a		; load high byte of wPosActiveBuffer value into h
-
+	; FIXME Uncomment
+	;ld a, [$d000]
+	;ld l, a
+	;ld a, [$d001]
+	;ld h, a
 	ld a, [hl]
 	ld e, a   
 	and $F0  
 	ld d, a    
-	jr nz, .regPulse1 
+	jr nz, regPulse1 
 	ld a, $1F
 	ldh [rNR12], a
 	ld a, $40
 	ldh [$F8], a
-	jr .pcm1
+	jr PCM1
 
-.regPulse1:
+regPulse1:
 	ld a, $C0
 	ldh [$F8], a
 	ld a, d
 	or $0F
 	ldh [rNR12], a
 
-.pcm1:
+PCM1:
 	ld a, e
 	and $07
 	ld d, a
@@ -340,7 +313,7 @@ PlaySample:
 	ldh [$F7], a
 	ld a, e
 	and $08
-	jr z, .noVol
+	jr z, noVol
 	ldh a, [$F7]
 	ldh [rNR50], a
 
@@ -350,9 +323,9 @@ PlaySample:
 	ld a, $80
 	ldh [rNR14], a
 
-	jr .endPCM
+	jr endPCM
 
-.noVol:	
+noVol:	
 	ldh a, [$F8]
 	ldh [rNR11], a
 	
@@ -361,63 +334,47 @@ PlaySample:
 
 	ldh a, [$F7]
 	ldh [rNR50], a
-.endPCM:
-	; TODO Uncomment to read from ROM
-	;inc l
-	
+endPCM:
+	inc l
 	; TODO Increment read position in WRAM ($d000)
-	; FIXME Uncomment to read from WRAM
-	; TODO hl should already contain current sample position
-	;ld a, LOW(wPosActiveBuffer)
+	; FIXME Uncomment
+	;ld a, [$d000]
 	;ld l, a
-	;ld a, HIGH(wPosActiveBuffer)
+	;ld a, [$d001]
 	;ld h, a
-	inc hl	; TODO inc l or inc hl???
-	ld de, wPosActiveBuffer	; de hold the destination address
-	ld a, l
-	ld [de], a
-	inc de
-	ld a, h
-	ld [de], a
+	;inc hl	; TODO inc l or inc hl???
+	;ld a, l
+	;ld [$d000], a
+	;ld a, h
+	;ld [$d001], a
+	;ld a, h
 	; Handle end of buffer --> loop
-	ld a, h
-	cp HIGH(wBuffersEnd)
-	jp nz, .keepGoing
-	ld de, wPosActiveBuffer + 1		; de holds destination address
-	ld a, HIGH(wBuffer0)	; otherwise back to buffer0
-	ld [de], a
-.keepGoing:
+	;cp $d9		;FIXME $d3
+	;jp nz, keepGoing
+	;ld a, $d1	; back to $d100
+	;ld [$d001], a
+keepGoing:
 
 	; TODO No need for bank switching
 	; TODO loop between dual audio buffers instead???
-	jp .sampleEnd		; TODO Uncomment to read from WRAM
-
-	;; TODO Unused when playing from WRAM
 
 	; FIXME Comment
-	jr nz, .sampleEnd	; keep playing if lower byte of "playing sample address" is not $00
-	inc h				; increment higher byte of "playing sample address" otherwise
+	jr nz, sampleEnd
+	inc h
 	ld a, h
-	cp HIGH(BANK1_END)
-	jr nz, .sampleEnd	; keep playing if higher byte of "playing sample address" is not $80 (i.e. we reached $8000, end of bank)
-	ld hl, BANK1_START	; otherwise we reached end of bank --> go back to beginning of bank $4000
-	inc b				; increment bank
+	cp $80
+	jr nz, sampleEnd
+	ld h, $40
+	inc b
 	ld a, b
-	ld [rROMB0], a		; switch current bank
-	; TODO compare to last bank? (32 overflows)
-	cp 5
-	jr nz, .sampleEnd	; keep playing if bank did not overflow
-	; TODO reset bank
-	ld b, $01
-	ld a, b
-	ld [rROMB0], a		; switch current bank
-	ld hl, BANK1_START
-	;ld c, $00			; if bank overflowed, increment the 2 upper bits to address more banks ==> not required for 32 banks (128KB) ROM
-	;inc c
-	;ld a, c
-	;ld [rROMB1], a
+	ld [$2000], a
+	jr nz, sampleEnd
+	ld c, $00
+	inc c
+	ld a, c
+	ld [$3000], a
 
-.sampleEnd:
+sampleEnd:
 	ld sp, $FFFF
 	ei
 	;jp playSample ;Only uncomment this if you know what you're doing!
@@ -426,14 +383,14 @@ PlaySample:
 				   ;Also, comment the previous 2 lines if you use no
 				   ;interrupts.
 
-Lockup:
+lockup:
 	nop
 	nop
 	nop
 	nop
-	jr Lockup
+	jr lockup
 SECTION "Additional lockup", ROM0[$04FC] ;I included this just to be safe.
-	jp Lockup
+	jp lockup
 
 
 
@@ -449,38 +406,30 @@ Serial:
 	; TODO If buffer is full, swap buffers ???
 	push af
 	push bc
-	push de
-	push hl
 
 	; FIXME increment serial data counter to be displayed on screen?
 	
 	; Load destination address TODO select inactive buffer !!!
-	ld de, wPosInactiveBuffer
-	; de contains wPosInactiveBuffer address
-	ld a, [de]
-	ld l, a		; load low byte of wPosInactiveBuffer value into l
-	inc de
-	ld a, [de]
-	ld h, a		; load high byte of wPosInactiveBuffer value into h
-	; hl contains destination data address
+	ld a, [$d002]
+	ld l, a
+	ld a, [$d003]
+	ld h, a
 	; Read received data
 	ldh a, [rSB]
 	; Copy to destination
 	ld [hl], a
 	; Increment destination
-	inc hl	; TODO inc l or inc hl???
-	ld de, wPosInactiveBuffer	; de hold the destination address
+	inc hl
 	ld a, l
-	ld [de], a
-	inc de
+	ld [$d002], a
 	ld a, h
-	ld [de], a
+	ld [$d003], a
 	; Handle end of buffer --> loop
-	cp HIGH(wBuffersEnd)
-	jp nz, .noLoopback
-	ld a, HIGH(wBuffer0)	; back to buffer 0
-	ld [de], a
-.noLoopback:
+	cp $d9		;FIXME $d3
+	jp nz, noLoopback
+	ld a, $d1	; back to $d100
+	ld [$d003], a
+noLoopback:
 
 	; TODO Handle end of buffer --> switch active buffer
 	; TODO temp = [$d002] & 0xff00
@@ -488,8 +437,6 @@ Serial:
 	; TODO [$d000] = temp
 	; TODO hl = 
 
-	pop hl
-	pop de
 	pop bc
 	pop af
 
@@ -510,7 +457,7 @@ Serial:
 
 SECTION "TILES", ROM0[$1000]
 
-TilesData:
+tiles_data:
 	DW	`00011223
 	DW	`00011223
 	DW	`00011223
@@ -520,25 +467,14 @@ TilesData:
 	DW	`32211000
 	DW	`32211000
 
-TilesFontData:
+tiles_font_data:
 	chr_IBMPC1	2,2
-TilesFontDataEnd:
+tiles_font_data_end:
 
 
-TextData:
+text_data:
 	db "12345"
-TextDataEnd:
-
-
-SECTION "VRAM Tiles", VRAM[$8000]
-vEmptyTile:
-	ds 1 * 16
-vTile1:
-    ds 1 * 16
-vUnusedTiles:
-	ds 30 * 16
-vFontTiles:
-	ds 32 * 16
+text_data_end:
 
 
 ; TODO Data in WRAM
@@ -553,16 +489,6 @@ vFontTiles:
 ;buffer0:		DS	0x100
 ;buffer1:		DS	0x100
 
-SECTION	"Variables", WRAMX
+SECTION	"Variables2", WRAM0[$c000]
 
-wTextPosX:		DS 1
-wPosActiveBuffer:	DS 2
-wPosInactiveBuffer:	DS 2
-ALIGN 8
-wBuffer0:		DS	$400
-wBuffer1:		DS	$400
-wBuffersEnd:
-
-
-BANK1_START EQU $4000
-BANK1_END	EQU $8000
+text_pos_x:		DS 1
