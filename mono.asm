@@ -26,6 +26,11 @@
 INCLUDE "hardware.inc"
 INCLUDE "ibmpc1.inc"			; nice ascii tileset from devrs.com
 
+; TODO VBlank interrupt --> draw hex characters (using simple shifts) of buffer positions
+SECTION "vblank", ROM0 [$40]
+	jp VBlank
+
+
 SECTION "Timer interrupt", ROM0[$50]
 TimerInterrupt:
     call PlaySample
@@ -110,7 +115,8 @@ Start:
 					; FIXME if CGB single-speed --> $FC ???
 	ld a, %00000110
 	ldh [rTAC], a	; Enable timer @ CPU clock / 64 (CGB Double Speed --> 131072 Hz)
-	ld a, $0c		; FIXME 0x08 | 0x04 = 0x0c instead of 0x04
+	; FIXME Enable VBlank interrupt 0x01
+	ld a, $0d		; FIXME 0x08 | 0x04 | 0x01 = 0x0d instead of 0x04
 	ldh [rIE], a
 	; TODO serial external clock ?
 	ld a, $80
@@ -436,14 +442,102 @@ SECTION "Additional lockup", ROM0[$04FC] ;I included this just to be safe.
 	jp Lockup
 
 
+;VBlank interrupt
+VBlank:
+	; TODO Display hex characters
+	ld de, wPosActiveBuffer
+	; de contains wPosActiveBuffer address
+	ld a, [de]
+	ld l, a		; load low byte of wPosActiveBuffer value into l
+	inc de
+	ld a, [de]
+	ld h, a		; load high byte of wPosActiveBuffer value into h
+	; hl contains wPosActiveBuffer VALUE
+	; TODO Right-shift 12 bits for 1st nibble
+	; TODO Right-shift 8 bits and mask 4 bits for 2nd nibble
+	; TODO Right-shift 4 bits and mask 4 bits for 3rd nibble
+	; TODO Mask 4 bits for 4th nibble
+	; TODO HANDLE ALL FOUR NIBBLES
 
-; TODO Data in WRAM
-; $d000: position in active buffer (read) --> e.g. $d120
-; $d002: position in inactive buffer (write) --> e.g. $d2a5
-; $d100: buffer 0 (256 bytes)
-; $d200: buffer 1 (256 bytes)
+	; FIXME Make a function call or a macro to convert number to hex char
+	
+	; 1st nibble
+	ld a, h
+	srl a
+	srl a
+	srl a
+	srl a
+	cp $0a
+	jr c, .digit1
+	add $07
+.digit1
+	add $30
+	; a contains 1st nibble character
+	ld [wText], a
+	; 2nd nibble
+	ld a, h
+	ld b, $0f
+	and b
+	cp $0a
+	jr c, .digit2
+	add $07
+.digit2
+	add $30
+	; a contains 2nd nibble character
+	ld [wText+1], a
+	; 3rd nibble
+	ld a, l
+	srl a
+	srl a
+	srl a
+	srl a
+	cp $0a
+	jr c, .digit3
+	add $07
+.digit3
+	add $30
+	; a contains 3rd nibble character
+	ld [wText+2], a
+	; 4th nibble
+	ld a, l
+	ld b, $0f
+	and b
+	; a contains 4th nibble value ?
+	; TODO add 0x30 for digits, 0x37 for letters
+	cp $0a
+	jr c, .digit4
+	add $07
+.digit4
+	add $30
+	; a contains 4th nibble character
+	ld [wText+3], a
+	; wText contains hex characters
+	; TODO update sprites / background tiles
+	ld b, 4; TODO Compute length --> 4 chars ??? TextDataEnd-TextData
+	ld a, 50
+	ld [wTextPosX], a	; X position
+	ld de, wText
+	ld hl, _OAMRAM + (4 * 8) 	; HL=$FE00 + 8 sprites
+.textLoop:
+	ld [hl], 60 	; OAM sprite Y = 40
+	inc l
+	ld a, [wTextPosX]
+	ld [hl], a		; OAM sprite X = 50 and onward
+	add a, 10
+	ld [wTextPosX], a
+	inc l
+	ld a, [de]
+	ld [hl], a 		; OAM sprite tile = hex character
+	inc de
+	inc l
+	ld [hl], $00 	; OAM sprite attributes = 0
+	inc l
+	dec b
+	jr nz, .textLoop
 
 
+
+; Serial interrupt
 Serial:
 	; TODO Move received data to inactive audio buffer
 	; TODO If buffer is full, swap buffers ???
@@ -521,7 +615,7 @@ TilesData:
 	DW	`32211000
 
 TilesFontData:
-	chr_IBMPC1	2,2
+	chr_IBMPC1	2,3
 TilesFontDataEnd:
 
 
@@ -555,9 +649,10 @@ vFontTiles:
 
 SECTION	"Variables", WRAMX
 
-wTextPosX:		DS 1
+wTextPosX:			DS 1
 wPosActiveBuffer:	DS 2
 wPosInactiveBuffer:	DS 2
+wText:				DS 4
 ALIGN 8
 wBuffer0:		DS	$400
 wBuffer1:		DS	$400
