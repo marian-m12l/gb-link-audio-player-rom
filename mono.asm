@@ -163,6 +163,14 @@ Start:
 	ld a, HIGH(wBuffer1)
 	ld [de], a
 
+	; TODO Initialize serial counter
+	ld de, wSerialCounter		; de holds destination address
+	xor a
+	ld [de], a
+	inc de
+	ld [de], a
+
+
 
 .waitvbl:
 	ldh a, [rLY]	; Read current line
@@ -444,8 +452,26 @@ SECTION "Additional lockup", ROM0[$04FC] ;I included this just to be safe.
 
 ;VBlank interrupt
 VBlank:
+	push af
+	push bc
+	push de
+	push hl
+
+	; TODO blink a sprite? sprite2 == digit sprite
+	ld hl, _OAMRAM + (4 * 2) + 2 	; tile number for sprite 2
+	ld a, [hl]
+	inc a
+	cp $3a
+	jr nz, .counter_end
+.counter_reset:
+	ld a, $30
+.counter_end:
+	ld [hl], a
+
+
 	; TODO Display hex characters
-	ld de, wPosActiveBuffer
+	; FIXME display multipe values !!! ld de, wPosActiveBuffer
+	ld de, wSerialCounter
 	; de contains wPosActiveBuffer address
 	ld a, [de]
 	ld l, a		; load low byte of wPosActiveBuffer value into l
@@ -535,6 +561,13 @@ VBlank:
 	dec b
 	jr nz, .textLoop
 
+	pop hl
+	pop de
+	pop bc
+	pop af
+
+	reti
+
 
 
 ; Serial interrupt
@@ -547,6 +580,20 @@ Serial:
 	push hl
 
 	; FIXME increment serial data counter to be displayed on screen?
+	ld de, wSerialCounter
+	ld a, [de]
+	ld l, a		; load low byte of wSerialCounter value into l
+	inc de
+	ld a, [de]
+	ld h, a		; load high byte of wSerialCounter value into h
+	inc hl
+	ld de, wSerialCounter
+	ld a, l
+	ld [de], a
+	inc de
+	ld a, h
+	ld [de], a
+	
 	
 	; Load destination address TODO select inactive buffer !!!
 	ld de, wPosInactiveBuffer
@@ -581,6 +628,10 @@ Serial:
 	; TODO [$d002] = [$d000] & 0xff00
 	; TODO [$d000] = temp
 	; TODO hl = 
+
+	; TODO serial external clock ?
+	ld a, $80
+	ldh [rSC], a
 
 	pop hl
 	pop de
@@ -652,6 +703,7 @@ SECTION	"Variables", WRAMX
 wTextPosX:			DS 1
 wPosActiveBuffer:	DS 2
 wPosInactiveBuffer:	DS 2
+wSerialCounter:		DS 2
 wText:				DS 4
 ALIGN 8
 wBuffer0:		DS	$400
