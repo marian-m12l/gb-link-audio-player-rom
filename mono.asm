@@ -33,7 +33,8 @@ SECTION "vblank", ROM0 [$40]
 
 SECTION "Timer interrupt", ROM0[$50]
 TimerInterrupt:
-    call PlaySample
+	;FIXME use ret / reti and don't screw up stack to avoid messing with the other interrupts!!!
+    jp PlaySample
 	nop
 	nop
 	nop
@@ -106,9 +107,10 @@ Start:
 	ldh [rNR50], a	; L/R medium volume (4/7)
 	;ld a, $F9		;Modify this value to change the playback rate!
 	;ld a, $F8		;Modify this value to change the playback rate!
-	ld a, $FC		;Modify this value to change the playback rate!
+	;ld a, $FC		;Modify this value to change the playback rate!
 	; FIXME is the CGB in single speed fast enough to handle 16KHz playrate AND serial input?
-	ld a, $F8		; TODO Try 8HKz playback !!!
+	;ld a, $F8		; TODO Try 8HKz playback !!!
+	ld a, $F0		; TODO Try 4HKz playback !!!
 	ldh [rTMA], a	; Timer modulo --> When TIMA overflows, it is reset to the value in this register and an interrupt is requested. Example of use: if TMA is set to $FF, an interrupt is requested at the clock frequency selected in TAC (because every increment is an overflow). However, if TMA is set to $FE, an interrupt is only requested every two increments, which effectively divides the selected clock by two. Setting TMA to $FD would divide the clock by three, and so on.
 					; $F9 --> freq / 7 ???
 					; $F8 --> freq / 8 == 16384Hz ?
@@ -116,7 +118,7 @@ Start:
 	ld a, %00000110
 	ldh [rTAC], a	; Enable timer @ CPU clock / 64 (CGB Double Speed --> 131072 Hz)
 	; FIXME Enable VBlank interrupt 0x01
-	ld a, $0d		; FIXME 0x08 | 0x04 | 0x01 = 0x0d instead of 0x04
+	ld a, $0c		; FIXME 0x08 | 0x04 | 0x01 = 0x0d instead of 0x04
 	ldh [rIE], a
 	; TODO serial external clock ?
 	ld a, $80
@@ -134,12 +136,15 @@ Start:
 	inc de
 	ld a, HIGH(wBuffer1)
 	ld [de], a
+
+
 	; TODO Copy ROM audio to RAM?
 	ld bc, wBuffersEnd-wBuffer0		; Buffers can hold 1024 bytes each
 	ld de, BANK1_START	; Audio data in ROM --> load from a given offset?
 	ld hl, wBuffer0 	; Audio buffers in RAM
 .ldAudio:
-	ld a, [de]
+	; FIXME rom data or zero ??? ld a, [de]
+	xor a
 	ldi [hl], a
 	inc de
 	dec bc
@@ -314,9 +319,27 @@ Start:
 .waitforInt:
 	nop
 	nop
-	jr .waitforInt
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	jr .waitforInt	; FIXME jr takes 3 cycles --> add more NOP (1 cycle) in main loop???
 
 PlaySample:
+	; TODO Check serial interrupt --> drop sample if there is serial data
+;	ldh a, [rIF]
+;	and $08
+;	jr nz, .sampleEnd
 	; TODO Get read position from WRAM
 	; FIXME Uncomment to read from WRAM
 	ld de, wPosActiveBuffer
@@ -432,13 +455,19 @@ PlaySample:
 	;ld [rROMB1], a
 
 .sampleEnd:
-	ld sp, $FFFF
-	ei
+	;ld sp, $FFFF
+	;ei
 	;jp playSample ;Only uncomment this if you know what you're doing!
 				   ;No interrupt playback is experimental as I don't
 				   ;exactly know the precise playback rate.
 				   ;Also, comment the previous 2 lines if you use no
 				   ;interrupts.
+	
+	; FIXME: this interrupt never returns!!! simply reenables interrupts!
+	; NO NEED TO RETURN IF THERE'S NOTHING IN MAIN LOOP!
+
+	;FIXME use ret / reti and don't screw up stack to avoid messing with the other interrupts!!!
+	reti
 
 Lockup:
 	nop
@@ -456,6 +485,8 @@ VBlank:
 	push bc
 	push de
 	push hl
+
+	; TODO Do this in main loop on shadow OAM + Only transfer in VBlank interrupt !!!
 
 	; TODO blink a sprite? sprite2 == digit sprite
 	ld hl, _OAMRAM + (4 * 2) + 2 	; tile number for sprite 2
@@ -486,7 +517,7 @@ VBlank:
 	; TODO HANDLE ALL FOUR NIBBLES
 
 	; FIXME Make a function call or a macro to convert number to hex char
-	
+
 	; 1st nibble
 	ld a, h
 	srl a
@@ -566,61 +597,70 @@ VBlank:
 	pop bc
 	pop af
 
-	reti
+	reti					;[4]
 
 
 
 ; Serial interrupt
 Serial:
+	; TODO Entering ISR takes [5] cycles!
+
+
 	; TODO Move received data to inactive audio buffer
 	; TODO If buffer is full, swap buffers ???
-	push af
-	push bc
-	push de
-	push hl
 
+; FIXME push/pop is VERY costly (4 cycles for each push, 3 cycles for each pop)
+; TODO If there's nothing running in main loop, there's no need to preserve registers
+;	push af
+;	push bc
+;	push de
+;	push hl
+
+/*
 	; FIXME increment serial data counter to be displayed on screen?
-	ld de, wSerialCounter
-	ld a, [de]
-	ld l, a		; load low byte of wSerialCounter value into l
-	inc de
-	ld a, [de]
-	ld h, a		; load high byte of wSerialCounter value into h
-	inc hl
-	ld de, wSerialCounter
-	ld a, l
-	ld [de], a
-	inc de
-	ld a, h
-	ld [de], a
-	
-	
+	ld de, wSerialCounter	;[3]
+	ld a, [de]				;[2]
+	ld l, a					;[1]		; load low byte of wSerialCounter value into l
+	inc de					;[2]
+	ld a, [de]				;[2]
+	ld h, a					;[1]		; load high byte of wSerialCounter value into h
+	inc hl					;[2]
+	ld de, wSerialCounter	;[3]
+	ld a, l					;[1]
+	ld [de], a				;[2]
+	inc de					;[2]
+	ld a, h					;[1]
+	ld [de], a				;[2]
+							; Total cycles for counter increment: [24]
+*/	
+
 	; Load destination address TODO select inactive buffer !!!
-	ld de, wPosInactiveBuffer
+	ld de, wPosInactiveBuffer		;[3]
 	; de contains wPosInactiveBuffer address
-	ld a, [de]
-	ld l, a		; load low byte of wPosInactiveBuffer value into l
-	inc de
-	ld a, [de]
-	ld h, a		; load high byte of wPosInactiveBuffer value into h
+	ld a, [de]						;[2]
+	ld l, a							;[1]	; load low byte of wPosInactiveBuffer value into l
+	inc de							;[2]
+	ld a, [de]						;[2]
+	ld h, a							;[1]	; load high byte of wPosInactiveBuffer value into h
 	; hl contains destination data address
 	; Read received data
-	ldh a, [rSB]
+	ldh a, [rSB]					;[3]
 	; Copy to destination
-	ld [hl], a
+	ld [hl], a						;[2]
 	; Increment destination
-	inc hl	; TODO inc l or inc hl???
-	ld de, wPosInactiveBuffer	; de hold the destination address
-	ld a, l
-	ld [de], a
-	inc de
-	ld a, h
-	ld [de], a
+	inc hl							;[2]	; TODO inc l or inc hl???
+	ld de, wPosInactiveBuffer		;[3]	; de hold the destination address
+	ld a, l							;[1]
+	ld [de], a						;[2]
+	inc de							;[2]
+	ld a, h							;[1]
+	ld [de], a						;[2]
 	; Handle end of buffer --> loop
-	cp HIGH(wBuffersEnd)
-	jp nz, .noLoopback
-	ld a, HIGH(wBuffer0)	; back to buffer 0
-	ld [de], a
+	cp HIGH(wBuffersEnd)			;[2]
+	jp nz, .noLoopback				;[4|3]	; 4 cycles if path taken, 3 cycles otherwise
+	ld a, HIGH(wBuffer0)			;[2]	; back to buffer 0
+	ld [de], a						;[2]
+									; Total cycles for buffer increment: [35|38]
 .noLoopback:
 
 	; TODO Handle end of buffer --> switch active buffer
@@ -630,13 +670,17 @@ Serial:
 	; TODO hl = 
 
 	; TODO serial external clock ?
-	ld a, $80
-	ldh [rSC], a
+	ld a, $80				;[2]
+	ldh [rSC], a			;[3]
 
-	pop hl
-	pop de
-	pop bc
-	pop af
+	; TODO write an increment (low byte of counter / buffer position is in register l) to rSB to see in logic analyzer if the interrupt was run!!!
+	;ld a, l					;[1]
+	;ldh [rSB], a			;[3]
+
+;	pop hl
+;	pop de
+;	pop bc
+;	pop af
 
 	;push af
 	;push hl
@@ -649,7 +693,12 @@ Serial:
 	;pop de
 	;pop hl
 	;pop af
-	reti
+
+	reti					;[4]
+
+	; Total cycles for interrupt WITH COUNTER INCREMENT ONLY: [5+24+9] = [38]
+
+	; Total cycles for interrupt WITH BUFFER INCREMENT ONLY: [5+38+9] = [52]
 
 
 
@@ -671,7 +720,7 @@ TilesFontDataEnd:
 
 
 TextData:
-	db "12345"
+	db "AUDIO"
 TextDataEnd:
 
 
