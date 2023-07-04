@@ -1,0 +1,6 @@
+*.raw
+*.class
+*.gbc
+*.sym
+*.o
+*.map
